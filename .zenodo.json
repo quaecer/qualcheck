@@ -1,0 +1,12 @@
+{
+  "title": "qualcheck",
+  "description": "Verify received assessment documents.",
+  "creators": [
+    {
+      "name": "Steeghs-Turchina, Mariia"
+    }
+  ],
+  "license": "Apache-2.0",
+  "version": "1.0.0.dev0",
+  "upload_type": "software"
+}
