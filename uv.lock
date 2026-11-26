@@ -382,6 +382,9 @@ wheels = [
 name = "quaecer-qualcheck"
 version = "1.0.0.dev0"
 source = { editable = "." }
+dependencies = [
+    { name = "quaecer-spec-qualification" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -392,6 +395,7 @@ dev = [
 ]
 
 [package.metadata]
+requires-dist = [{ name = "quaecer-spec-qualification", git = "https://github.com/quaecer/specs.git?subdirectory=qualification&rev=0ca04bc9cf0e3b16feb13f1349a1179ddca41e07" }]
 
 [package.metadata.requires-dev]
 dev = [
@@ -400,6 +404,11 @@ dev = [
     { name = "pytest", specifier = ">=8,<10" },
     { name = "ruff", specifier = "==0.17.6" },
 ]
+
+[[package]]
+name = "quaecer-spec-qualification"
+version = "1.0.0"
+source = { git = "https://github.com/quaecer/specs.git?subdirectory=qualification&rev=0ca04bc9cf0e3b16feb13f1349a1179ddca41e07#0ca04bc9cf0e3b16feb13f1349a1179ddca41e07" }
 
 [[package]]
 name = "ruff"
