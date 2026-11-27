@@ -3,15 +3,17 @@
 
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from itertools import pairwise
 from typing import Any
 
+from ._jcs import dumps
 from .constraints import Budget, Clause, LimitReached, feasible
 from .schema import BASE
 
 _SCHEME = BASE + "occurrence/explicit-id"
 _MAX_UTC = 315_537_897_599_999_999
+_EPOCH = datetime(1, 1, 1, tzinfo=UTC)
 
 
 def coordinate(value: str | datetime) -> int:
@@ -19,6 +21,11 @@ def coordinate(value: str | datetime) -> int:
     time = datetime.fromisoformat(value).astimezone(UTC) if isinstance(value, str) else value
     seconds = (time.toordinal() - 1) * 86400 + time.hour * 3600 + time.minute * 60 + time.second
     return seconds * 1_000_000 + time.microsecond
+
+
+def timestamp(point: int) -> str:
+    """Encode an integral clock reading or UTC bound in canonical UTC spelling."""
+    return (_EPOCH + timedelta(microseconds=point)).isoformat().replace("+00:00", "Z")
 
 
 def _bounds(row: dict[str, Any]) -> tuple[int, int] | None:
@@ -74,7 +81,8 @@ class Exact:
     challenges: tuple[tuple[str, str, tuple[str, ...]], ...]
     opposing: tuple[tuple[str, str, tuple[str, ...]], ...]
     inferred_violation: bool
-    omissions: tuple[tuple[str, int, int, tuple[str, ...], tuple[str, ...]], ...]
+    omissions: tuple[tuple[str, int, int, str, tuple[str, ...], tuple[str, ...]], ...]
+    clock_constraints: tuple[dict[str, Any], ...]
 
 
 @dataclass(frozen=True)
@@ -89,6 +97,7 @@ class Reading:
     bounds: tuple[int, int] | None
     clock: str | None
     accuracy: int | None
+    unit: str | None
 
 
 def _reading(
@@ -99,6 +108,7 @@ def _reading(
     scheme: str | None,
     clock: str | None = None,
     accuracy: int | None = None,
+    unit: str | None = None,
 ) -> Reading:
     resource = fields["resource"]
     return Reading(
@@ -112,6 +122,7 @@ def _reading(
         _bounds(fields),
         clock,
         accuracy,
+        unit,
     )
 
 
@@ -230,6 +241,7 @@ class _Problem:
     def __init__(self, count: int) -> None:
         self.size = count + 1
         self.positive: list[Clause] = []
+        self.constraints: list[dict[str, Any]] = []
         self.points: dict[tuple[str, int], int] = {}
         self.scopes: dict[str, list[tuple[int, int, int]]] = defaultdict(list)
 
@@ -256,14 +268,29 @@ class _Problem:
                 self.positive.append(((left, right, 0, False),))
 
 
-def _compile_events(groups: list[list[Reading]], problem: _Problem) -> list[Event]:
+def _compile_events(
+    groups: list[list[Reading]], problem: _Problem, pins: dict[str, str]
+) -> list[Event]:
     events = []
     for number, group in enumerate(groups, 1):
         boxes = []
+        occurrence = min(item.event_id for item in group)
         for item in group:
             if item.bounds is None:
                 continue
             left, right = item.bounds
+            if item.clock is None or item.accuracy is not None:
+                premise: dict[str, Any] = {
+                    "kind": "event_utc" if item.clock is None else "entry_clock",
+                    "report": {"id": item.report_id, "digest": pins[item.report_id]},
+                    "event_id": item.event_id,
+                    "occurrence": occurrence,
+                    "lower": timestamp(left),
+                    "upper": timestamp(right),
+                }
+                if item.clock is not None:
+                    premise.update(unit=item.unit, clock_id=item.clock, accuracy_us=item.accuracy)
+                problem.constraints.append(premise)
             if item.clock is None:
                 problem.limits(number, left, right)
                 boxes.append((left, right))
@@ -313,6 +340,7 @@ def check(
                         unit.scheme,
                         unit.clock,
                         unit.accuracy,
+                        unit.id,
                     )
                 )
     groups, conflicts, pending = _events(readings)
@@ -322,7 +350,19 @@ def check(
         problem.point(unit.clock, unit.upper)
         if unit.accuracy is not None:
             problem.scopes[unit.clock].append((unit.lower, unit.upper, unit.accuracy))
-    events = _compile_events(groups, problem)
+            problem.constraints.append(
+                {
+                    "kind": "capture_accuracy",
+                    "report": {"id": unit.statement, "digest": pins[unit.statement]},
+                    "unit": unit.id,
+                    "observer": unit.observer,
+                    "clock_id": unit.clock,
+                    "lower": timestamp(unit.lower),
+                    "upper": timestamp(unit.upper),
+                    "accuracy_us": unit.accuracy,
+                }
+            )
+    events = _compile_events(groups, problem, pins)
     problem.finish()
     event_by_id = {identifier: event for event in events for identifier in event.identifiers}
     eligible: set[str] = set()
@@ -434,6 +474,7 @@ def check(
                             (
                                 event.channel,
                                 *bounds,
+                                min(event.identifiers),
                                 event.reports,
                                 tuple(sorted(u.id for u, _ in pairs)),
                             )
@@ -534,6 +575,7 @@ def check(
             (unit, channel, tuple(sorted(batch[unit, channel]))) for unit, channel in sorted(batch)
         )
 
+    ordered = {dumps(row): row for row in problem.constraints}
     return Exact(
         status,
         frozenset(eligible),
@@ -546,4 +588,5 @@ def check(
         disputes(opposing),
         inferred_violation,
         tuple(omissions),
+        tuple(ordered[key] for key in sorted(ordered)),
     )
