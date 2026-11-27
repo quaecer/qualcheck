@@ -10,6 +10,7 @@ from typing import Any
 
 from ._jcs import dumps
 from .schema import BASE, Catalogue, decode
+from .timeline import timeline
 
 _SCALAR = {"body", "check", "control", "dependence", "run_status", "selection"}
 
@@ -272,11 +273,15 @@ def _decision(
 
 
 def derive(request: dict[str, Any]) -> dict[str, Any]:
-    """Recompute the result from raw inputs (QUAL-REQ-008 through QUAL-REQ-016)."""
+    """Recompute the result from raw inputs (QUAL-REQ-008 through QUAL-REQ-019)."""
     context = _Input(request)
     policy = context.policy
+    timing = timeline(policy, [context.reports[key] for key in context.selections])
     rows: list[dict[str, Any]] = []
     issues: dict[bytes, dict[str, Any]] = {}
+    for code, names, channel in timing.conflicts:
+        issue = _reason(code, None, names, channel=channel)
+        issues[dumps(issue)] = issue
     dependence = {}
     for rule in sorted(policy["rules"], key=lambda value: value["id"]):
         criterion = rule["id"]
@@ -293,6 +298,27 @@ def derive(request: dict[str, Any]) -> dict[str, Any]:
             record.update(execution="not_applicable", outcome="inapplicable")
             continue
         operator = rule["operator"]
+        if operator == "no_prelock_exposure":
+            if timing.violations:
+                names = set().union(*timing.violations)
+                record.update(
+                    value="opposition",
+                    outcome="failed",
+                    basis=context.basis(list(names)),
+                    reasons=sorted(
+                        [
+                            _reason("forbidden_exposure", criterion, group)
+                            for group in timing.violations
+                        ],
+                        key=dumps,
+                    ),
+                )
+            else:
+                reason = (
+                    "coverage_gap" if timing.compatibility == "compatible" else "clock_unresolved"
+                )
+                record["reasons"] = [_reason(reason, criterion)]
+            continue
         if operator not in _SCALAR:
             record["reasons"] = [
                 _reason("clock_unresolved", criterion, channel=rule.get("channel"))
@@ -335,9 +361,14 @@ def derive(request: dict[str, Any]) -> dict[str, Any]:
                 "basis": record["basis"],
             }
 
-    has_timing = any(context.reports[key]["kind"] not in _SCALAR for key in context.selections)
     results = {row["outcome"] for row in rows}
-    consistency = "inconsistent" if issues else "unresolved" if has_timing else "consistent"
+    consistency = (
+        "inconsistent"
+        if issues
+        else "unresolved"
+        if timing.compatibility != "compatible"
+        else "consistent"
+    )
     qualification = "prerequisites_unresolved"
     if "failed" in results:
         qualification = "prerequisites_failed"
@@ -351,7 +382,7 @@ def derive(request: dict[str, Any]) -> dict[str, Any]:
         "use": policy["use"]["id"],
         "subject": policy["subject"],
         "implementation": policy["implementation"],
-        "clock_compatibility": ("unresolved" if has_timing else "compatible"),
+        "clock_compatibility": timing.compatibility,
         "consistency": consistency,
         "qualification": qualification,
         "authorization": "not_granted",

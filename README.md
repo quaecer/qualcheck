@@ -12,7 +12,9 @@ qualcheck verify --input verification-envelope.json
 A verification envelope contains the raw assessment request and the supplied
 result. The receiver checks the complete result against its own computation.
 An unavailable or unresolved premise cannot establish a positive gate.
-Coverage, absence and transfer are outside the implemented scalar slice.
+Known exposure intervals and accepted aliases also constrain true time.
+A definite forbidden exposure can fail the gate. Full committed coverage,
+affirmative absence and transfer remain separate work.
 
 The canonicalization primitive is from [Trail of Bits' rfc8785.py 0.1.4](https://github.com/trailofbits/rfc8785.py)
 and includes adaptations of Andrew Rundgren's reference implementation.
