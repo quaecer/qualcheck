@@ -9,6 +9,7 @@ from fractions import Fraction
 from typing import Any
 
 from ._jcs import dumps
+from .projection import from_rdf
 from .schema import BASE, Catalogue, decode
 from .timeline import timeline
 
@@ -401,10 +402,14 @@ def receive(raw: bytes, catalogue: Catalogue) -> dict[str, Any]:
         message = decode(raw)
         if not isinstance(message, dict):
             return {"status": "invalid"}
-        if message.get("profile") == BASE + "verification-request":
-            if set(message) != {"profile", "request", "result"}:
-                return {"status": "invalid"}
-            request, supplied = message["request"], message["result"]
+        profile = message.get("profile")
+        if profile in (BASE + "verification-request", BASE + "rdf-verification-request"):
+            if profile == BASE + "rdf-verification-request":
+                request, supplied = from_rdf(message, catalogue)
+            else:
+                if not catalogue.accepts("verification-request", message):
+                    return {"status": "invalid"}
+                request, supplied = message["request"], message["result"]
             if (
                 not catalogue.accepts("request", request)
                 or request["operation"] != "assess"
