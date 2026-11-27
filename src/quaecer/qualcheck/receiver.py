@@ -12,6 +12,7 @@ from ._jcs import dumps
 from .capture import compose
 from .projection import from_rdf
 from .schema import BASE, Catalogue, decode
+from .transfer import reconstruct
 
 _SCALAR = {"body", "check", "control", "dependence", "run_status", "selection"}
 
@@ -431,6 +432,25 @@ def derive(request: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _evaluation(
+    request: dict[str, Any],
+    catalogue: Catalogue,
+    *,
+    allow_validation: bool = False,
+) -> dict[str, Any]:
+    if request.get("profile") == BASE + "transfer-request":
+        if not catalogue.accepts("transfer-request", request):
+            raise ValueError("invalid transfer envelope")
+        return reconstruct(request, derive)
+    if not catalogue.accepts("request", request):
+        raise ValueError("invalid assessment request")
+    if request["operation"] == "validate":
+        if not allow_validation:
+            raise ValueError("verification requires an assessment")
+        return {"status": "valid"}
+    return derive(request)
+
+
 def receive(raw: bytes, catalogue: Catalogue) -> dict[str, Any]:
     """Evaluate or verify one specified input and result (QUAL-REQ-017)."""
     try:
@@ -445,19 +465,10 @@ def receive(raw: bytes, catalogue: Catalogue) -> dict[str, Any]:
                 if not catalogue.accepts("verification-request", message):
                     return {"status": "invalid"}
                 request, supplied = message["request"], message["result"]
-            if (
-                not catalogue.accepts("request", request)
-                or request["operation"] != "assess"
-                or not catalogue.accepts("result", supplied)
-            ):
+            if not catalogue.accepts("result", supplied):
                 return {"status": "invalid"}
-            return {
-                "status": "verified" if dumps(derive(request)) == dumps(supplied) else "mismatch"
-            }
-        if not catalogue.accepts("request", message):
-            return {"status": "invalid"}
-        if message["operation"] == "validate":
-            return {"status": "valid"}
-        return derive(message)
+            result = _evaluation(request, catalogue)
+            return {"status": "verified" if dumps(result) == dumps(supplied) else "mismatch"}
+        return _evaluation(message, catalogue, allow_validation=True)
     except (ValueError, OverflowError, RecursionError):
         return {"status": "invalid"}
