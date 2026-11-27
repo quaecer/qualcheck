@@ -425,6 +425,7 @@ def derive(request: dict[str, Any]) -> dict[str, Any]:
         "authorization": "not_granted",
         "findings": rows,
         "coverage": list(capture.faces),
+        "clock_constraints": list(capture.clock_constraints),
         "dependence": [dependence[key] for key in sorted(dependence)],
         "inconsistencies": [issues[key] for key in sorted(issues)],
         "transfers": [],
