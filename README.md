@@ -1,6 +1,6 @@
 # Qualcheck
 
-Recompute a received scalar assessment from raw evidence and exact caller
+Recompute a received assessment from raw evidence and exact caller
 pins. The specification dependency supplies local schemas.
 The checker uses the Python standard library and those assets.
 
@@ -14,9 +14,11 @@ result. The receiver checks the complete result against its own computation.
 The fixed RDF envelope uses installed JSON-LD contexts for the raw evidence
 and carried result. Context changes and nested directives fail closed.
 An unavailable or unresolved premise cannot establish a positive gate.
-Known exposure intervals and accepted aliases also constrain true time.
-A definite forbidden exposure can fail the gate. Full committed coverage,
-affirmative absence and transfer remain separate work.
+The receiver recomputes interval coverage from exact empty commitments,
+including shared clocks and joint omission witnesses. Definite forbidden
+exposure is evaluated separately. A clock shift that may reconcile the
+record, nonempty inventories and capture challenges can leave compatibility
+unresolved. Transfer remains deferred.
 
 The canonicalization primitive is from [Trail of Bits' rfc8785.py 0.1.4](https://github.com/trailofbits/rfc8785.py)
 and includes adaptations of Andrew Rundgren's reference implementation.
