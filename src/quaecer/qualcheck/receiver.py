@@ -12,7 +12,6 @@ from ._jcs import dumps
 from .capture import compose
 from .projection import from_rdf
 from .schema import BASE, Catalogue, decode
-from .timeline import timeline
 
 _SCALAR = {"body", "check", "control", "dependence", "run_status", "selection"}
 
@@ -278,13 +277,9 @@ def derive(request: dict[str, Any]) -> dict[str, Any]:
     """Recompute the result from raw inputs (QUAL-REQ-008 through QUAL-REQ-019)."""
     context = _Input(request)
     policy = context.policy
-    timing = timeline(policy, [context.reports[key] for key in context.selections])
-    capture = compose(policy, context.reports, context.selections, timing)
+    capture = compose(policy, context.reports, context.selections)
     rows: list[dict[str, Any]] = []
     issues: dict[bytes, dict[str, Any]] = {dumps(item): item for item in capture.conflicts}
-    for code, names, channel in timing.conflicts:
-        issue = _reason(code, None, names, channel=channel)
-        issues[dumps(issue)] = issue
     dependence = {}
     for rule in sorted(policy["rules"], key=lambda value: value["id"]):
         criterion = rule["id"]
@@ -302,8 +297,10 @@ def derive(request: dict[str, Any]) -> dict[str, Any]:
             continue
         operator = rule["operator"]
         if operator not in _SCALAR:
-            if operator == "no_prelock_exposure" and timing.violations:
-                names = set().union(*timing.violations)
+            if operator == "no_prelock_exposure" and capture.violations:
+                names = set().union(*capture.violations)
+                if capture.inferred_violation:
+                    names.update(capture.premise_reports)
                 record.update(
                     value="opposition",
                     outcome="failed",
@@ -311,7 +308,7 @@ def derive(request: dict[str, Any]) -> dict[str, Any]:
                     reasons=sorted(
                         [
                             _reason("forbidden_exposure", criterion, group)
-                            for group in timing.violations
+                            for group in capture.violations
                         ],
                         key=dumps,
                     ),
@@ -324,20 +321,44 @@ def derive(request: dict[str, Any]) -> dict[str, Any]:
                 else [item["history"] for item in capture.faces]
             )
             names = {pin["id"] for item in areas for pin in item["statements"]}
-            record["basis"] = context.basis(list(names))
             complete = bool(areas) and all(not item["gaps"] for item in areas)
+            if (
+                operator == "no_prelock_exposure"
+                and capture.compatibility == "compatible"
+                and complete
+            ):
+                names.update(capture.premise_reports)
+            record["basis"] = context.basis(list(names))
             if (
                 capture.compatibility == "compatible"
                 and not capture.conflicts
                 and complete
-                and (operator == "coverage" or policy["forbidden"])
+                and (
+                    operator == "coverage"
+                    or (policy["forbidden"] and capture.possible_violation == ())
+                )
             ):
                 record.update(value="support", outcome="passed")
             else:
-                code = (
-                    "coverage_gap" if capture.compatibility == "compatible" else "clock_unresolved"
-                )
-                record["reasons"] = [_reason(code, criterion, channel=channel)]
+                code = "clock_unresolved"
+                if capture.compatibility == "compatible":
+                    code = (
+                        "possible_exposure"
+                        if operator == "no_prelock_exposure"
+                        and capture.possible_violation
+                        and complete
+                        else "coverage_gap"
+                    )
+                record["reasons"] = [
+                    _reason(
+                        code,
+                        criterion,
+                        set(capture.possible_violation or ())
+                        if code == "possible_exposure"
+                        else None,
+                        channel=channel,
+                    )
+                ]
             continue
 
         candidates = dict(context.matched(rule))
