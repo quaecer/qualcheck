@@ -145,6 +145,7 @@ def _events(readings: list[Reading]) -> tuple[list[list[Reading]], list[dict[str
         if len(descriptors) != 1 or len(numbers) > 1:
             issues.append(reason("conflicting_observations", reports=[r.report_id for r in items]))
             continue
+        disputes: set[str] = set()
         for reading in items:
             if (
                 reading.token is None
@@ -168,17 +169,14 @@ def _events(readings: list[Reading]) -> tuple[list[list[Reading]], list[dict[str
                     )
                     for m in members[alias]
                 ):
-                    issues.append(
-                        reason(
-                            "conflicting_observations",
-                            reports={reading.report_id, *(m.report_id for m in members[alias])},
-                        )
-                    )
+                    disputes.update((reading.report_id, *(m.report_id for m in members[alias])))
                 else:
                     neighbors.add(alias)
             for neighbor in neighbors - {identifier}:
                 adjacency[identifier].add(neighbor)
                 adjacency[neighbor].add(identifier)
+        if disputes:
+            issues.append(reason("conflicting_observations", reports=disputes))
     groups = []
     done = set()
     for name in sorted(members):
