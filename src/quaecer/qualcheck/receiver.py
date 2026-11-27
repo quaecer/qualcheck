@@ -9,6 +9,7 @@ from fractions import Fraction
 from typing import Any
 
 from ._jcs import dumps
+from .capture import compose
 from .projection import from_rdf
 from .schema import BASE, Catalogue, decode
 from .timeline import timeline
@@ -278,8 +279,9 @@ def derive(request: dict[str, Any]) -> dict[str, Any]:
     context = _Input(request)
     policy = context.policy
     timing = timeline(policy, [context.reports[key] for key in context.selections])
+    capture = compose(policy, context.reports, context.selections, timing)
     rows: list[dict[str, Any]] = []
-    issues: dict[bytes, dict[str, Any]] = {}
+    issues: dict[bytes, dict[str, Any]] = {dumps(item): item for item in capture.conflicts}
     for code, names, channel in timing.conflicts:
         issue = _reason(code, None, names, channel=channel)
         issues[dumps(issue)] = issue
@@ -299,8 +301,8 @@ def derive(request: dict[str, Any]) -> dict[str, Any]:
             record.update(execution="not_applicable", outcome="inapplicable")
             continue
         operator = rule["operator"]
-        if operator == "no_prelock_exposure":
-            if timing.violations:
+        if operator not in _SCALAR:
+            if operator == "no_prelock_exposure" and timing.violations:
                 names = set().union(*timing.violations)
                 record.update(
                     value="opposition",
@@ -314,16 +316,28 @@ def derive(request: dict[str, Any]) -> dict[str, Any]:
                         key=dumps,
                     ),
                 )
+                continue
+            channel = rule.get("channel")
+            areas = (
+                [item["window"] for item in capture.faces if item["channel"] == channel]
+                if operator == "coverage"
+                else [item["history"] for item in capture.faces]
+            )
+            names = {pin["id"] for item in areas for pin in item["statements"]}
+            record["basis"] = context.basis(list(names))
+            complete = bool(areas) and all(not item["gaps"] for item in areas)
+            if (
+                capture.compatibility == "compatible"
+                and not capture.conflicts
+                and complete
+                and (operator == "coverage" or policy["forbidden"])
+            ):
+                record.update(value="support", outcome="passed")
             else:
-                reason = (
-                    "coverage_gap" if timing.compatibility == "compatible" else "clock_unresolved"
+                code = (
+                    "coverage_gap" if capture.compatibility == "compatible" else "clock_unresolved"
                 )
-                record["reasons"] = [_reason(reason, criterion)]
-            continue
-        if operator not in _SCALAR:
-            record["reasons"] = [
-                _reason("clock_unresolved", criterion, channel=rule.get("channel"))
-            ]
+                record["reasons"] = [_reason(code, criterion, channel=channel)]
             continue
 
         candidates = dict(context.matched(rule))
@@ -367,7 +381,7 @@ def derive(request: dict[str, Any]) -> dict[str, Any]:
         "inconsistent"
         if issues
         else "unresolved"
-        if timing.compatibility != "compatible"
+        if capture.compatibility != "compatible"
         else "consistent"
     )
     qualification = "prerequisites_unresolved"
@@ -383,12 +397,12 @@ def derive(request: dict[str, Any]) -> dict[str, Any]:
         "use": policy["use"]["id"],
         "subject": policy["subject"],
         "implementation": policy["implementation"],
-        "clock_compatibility": timing.compatibility,
+        "clock_compatibility": capture.compatibility,
         "consistency": consistency,
         "qualification": qualification,
         "authorization": "not_granted",
         "findings": rows,
-        "coverage": [],
+        "coverage": list(capture.faces),
         "dependence": [dependence[key] for key in sorted(dependence)],
         "inconsistencies": [issues[key] for key in sorted(issues)],
         "transfers": [],

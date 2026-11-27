@@ -15,6 +15,7 @@ class Timeline:
     compatibility: str
     conflicts: tuple[tuple[str, set[str], str | None], ...]
     violations: tuple[set[str], ...]
+    groups: tuple[tuple[str, datetime, datetime, set[str]], ...]
 
 
 def _time(text: str) -> datetime:
@@ -41,8 +42,7 @@ def timeline(policy: dict[str, Any], selected: list[Report]) -> Timeline:
     """Reconstruct the exposure fragment without trusting result timing fields."""
     events = {row["id"]: row for row in selected if row["kind"] == "exposure"}
     uncertain = any(
-        row["kind"] in {"completeness", "capture_challenge", "channel_scope_challenge"}
-        for row in selected
+        row["kind"] in {"capture_challenge", "channel_scope_challenge"} for row in selected
     )
     adjacency: dict[str, set[str]] = {key: set() for key in events}
     occurrences: dict[tuple[Site, str], list[str]] = defaultdict(list)
@@ -71,6 +71,7 @@ def timeline(policy: dict[str, Any], selected: list[Report]) -> Timeline:
     h0, lock = _time(policy["history_scope"]["start"]), _time(policy["lock_at"])
     forbidden = {(pin["id"], pin["digest"]) for pin in policy["forbidden"]}
     violations: list[set[str]] = []
+    groups: list[tuple[str, datetime, datetime, set[str]]] = []
     incompatible = False
     remaining = set(events)
     while remaining:
@@ -103,7 +104,9 @@ def timeline(policy: dict[str, Any], selected: list[Report]) -> Timeline:
                 violations.extend(
                     {node} for node, (left, right) in known.items() if h0 <= left <= right < lock
                 )
-        elif in_policy and h0 <= latest <= earliest < lock:
-            violations.append(component)
+        else:
+            groups.append((channel, latest, earliest, component))
+            if in_policy and h0 <= latest <= earliest < lock:
+                violations.append(component)
     status = "incompatible" if incompatible else "unresolved" if uncertain else "compatible"
-    return Timeline(status, tuple(conflicts), tuple(violations))
+    return Timeline(status, tuple(conflicts), tuple(violations), tuple(groups))
