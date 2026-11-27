@@ -53,14 +53,28 @@ def from_rdf(
     """Extract raw request and result from the declared frame (QUAL-REQ-020)."""
     if not catalogue.accepts("rdf-verification-request", message):
         raise ValueError("invalid RDF verification envelope")
+    context = catalogue.context("evidence")
+
+    def evidence_frame(frame: dict[str, Any]) -> dict[str, Any]:
+        raw = dict(frame)
+        raw["evidence"] = _unframe(
+            raw.get("evidence"),
+            context,
+            "qual:Evidence",
+            "reports",
+            "qual:Observation",
+        )
+        return raw
+
     request = dict(message["request"])
-    request["evidence"] = _unframe(
-        request.get("evidence"),
-        catalogue.context("evidence"),
-        "qual:Evidence",
-        "reports",
-        "qual:Observation",
-    )
+    if request.get("profile") == BASE + "transfer-request":
+        for name in ("source", "target"):
+            side = request.get(name)
+            if not isinstance(side, dict):
+                raise ValueError("missing framed transfer side")
+            request[name] = evidence_frame(side)
+    else:
+        request = evidence_frame(request)
     result = _unframe(
         message["result"],
         catalogue.context("result"),
