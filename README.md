@@ -17,6 +17,8 @@ An unavailable or unresolved premise cannot establish a positive gate.
 The receiver solves the accepted shared-clock constraints, including typed
 inventories, and verifies joint omissions and witnessed capture challenges.
 An incomplete translation or bounded search leaves the decision unresolved.
+For a transfer envelope, the receiver evaluates both raw requests and
+reconstructs the certificate and target decision.
 
 Qualcheck shares the clock-constraint encoding for selected readings, aliases
 and omissions with Qualifier. Agreement on those cases checks conformance in
