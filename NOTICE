@@ -1,0 +1,10 @@
+Qualcheck includes code from Trail of Bits' rfc8785.py 0.1.4,
+licensed under the Apache License, Version 2.0.
+https://github.com/trailofbits/rfc8785.py/tree/v0.1.4
+
+Parts of that implementation adapt Andrew Rundgren's reference
+implementation, also licensed under Apache 2.0.
+https://github.com/cyberphone/json-canonicalization
+
+Qualcheck vendors the canonicalization primitive with a type annotation
+update. See LICENSE-rfc8785.txt for the license text.
