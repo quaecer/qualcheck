@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.15'",
@@ -395,7 +395,7 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "quaecer-spec-qualification", git = "https://github.com/quaecer/specs.git?subdirectory=qualification&rev=0ca04bc9cf0e3b16feb13f1349a1179ddca41e07" }]
+requires-dist = [{ name = "quaecer-spec-qualification", git = "https://github.com/quaecer/specs.git?subdirectory=qualification&rev=9807cf8ecfc7d95afeb56a0a264907239f55c0aa" }]
 
 [package.metadata.requires-dev]
 dev = [
@@ -408,7 +408,7 @@ dev = [
 [[package]]
 name = "quaecer-spec-qualification"
 version = "1.0.0"
-source = { git = "https://github.com/quaecer/specs.git?subdirectory=qualification&rev=0ca04bc9cf0e3b16feb13f1349a1179ddca41e07#0ca04bc9cf0e3b16feb13f1349a1179ddca41e07" }
+source = { git = "https://github.com/quaecer/specs.git?subdirectory=qualification&rev=9807cf8ecfc7d95afeb56a0a264907239f55c0aa#9807cf8ecfc7d95afeb56a0a264907239f55c0aa" }
 
 [[package]]
 name = "ruff"

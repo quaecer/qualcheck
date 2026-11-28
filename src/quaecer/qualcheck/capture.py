@@ -4,15 +4,17 @@
 import hashlib
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any
 
 from ._jcs import dumps
 from .clock_view import Unit, check, reason
+from .clock_view import timestamp as _text
 
 _ZERO = datetime(1, 1, 1, tzinfo=UTC)
 
 type Segment = tuple[int, int, set[str]]
+type Support = tuple[int, int, dict[str, Any]]
 type Pair = tuple[str, str]
 
 
@@ -20,11 +22,6 @@ def _point(value: str | datetime) -> int:
     time = datetime.fromisoformat(value).astimezone(UTC) if isinstance(value, str) else value
     elapsed = time - _ZERO
     return elapsed.days * 86400000000 + elapsed.seconds * 1000000 + elapsed.microseconds
-
-
-def _text(value: int) -> str:
-    stamp = _ZERO + timedelta(microseconds=value)
-    return stamp.isoformat().removesuffix("+00:00") + "Z"
 
 
 def _range(document: dict[str, str]) -> tuple[int, int]:
@@ -40,6 +37,7 @@ class Composed:
     possible_violation: tuple[str, ...] | None
     premise_reports: tuple[str, ...]
     inferred_violation: bool
+    clock_constraints: tuple[dict[str, Any], ...]
 
 
 def _regions(spans: list[Segment]) -> list[Segment]:
@@ -65,22 +63,35 @@ def _regions(spans: list[Segment]) -> list[Segment]:
     return result
 
 
-def _erode(parts: list[Unit], margin: int = 0) -> list[Segment]:
-    proofs: list[Segment] = []
-    clocks = {part.clock for part in parts}
-    for clock in clocks:
-        members = [p for p in parts if p.clock == clock and p.accuracy is not None]
-        levels = sorted({max(margin, p.accuracy) for p in members if p.accuracy is not None})
-        for level in levels:
-            contiguous = _regions(
-                [
-                    (p.lower, p.upper, {p.id})
-                    for p in members
-                    if p.accuracy is not None and p.accuracy <= level
-                ]
-            )
-            proofs.extend((start + level, end - level, ids) for start, end, ids in contiguous)
-    return _regions(proofs)
+def _erode(units: list[Unit], margin: int) -> list[Support]:
+    """Retain each eligible same-clock component before cross-clock union."""
+    by_clock: dict[str, list[Unit]] = defaultdict(list)
+    for unit in units:
+        by_clock[unit.clock].append(unit)
+    support = []
+    for clock, members in by_clock.items():
+        lookup = {unit.id: unit for unit in members}
+        for lower, upper, ids in _regions(
+            [(unit.lower, unit.upper, {unit.id}) for unit in members]
+        ):
+            start, end = lower + margin, upper - margin
+            if start < end:
+                support.append(
+                    (
+                        start,
+                        end,
+                        {
+                            "clock_id": clock,
+                            "lower": _text(lower),
+                            "upper": _text(upper),
+                            "accuracy_us": max(lookup[name].accuracy or 0 for name in ids),
+                            "erosion_us": margin,
+                            "observers": sorted({lookup[name].observer for name in ids}),
+                            "unit_ids": sorted(ids),
+                        },
+                    )
+                )
+    return support
 
 
 def _parse(
@@ -154,7 +165,7 @@ def _affected(all_scopes: list[Unit], failed: Unit, channel: str, rule: str) -> 
 
 def _projection(
     span: tuple[int, int],
-    positive: list[Segment],
+    proofs: list[Support],
     exclusions: list[Segment],
     evidence: list[dict[str, Any]],
     warnings: list[dict[str, Any]],
@@ -171,7 +182,7 @@ def _projection(
             for start, end, ids in parts
         ]
 
-    positive = clipped(positive)
+    positive = clipped([(a, b, set(proof["unit_ids"])) for a, b, proof in proofs])
     gaps = []
     for lower, upper, _ in positive:
         if left < lower:
@@ -182,6 +193,20 @@ def _projection(
     unique = {dumps(row): row for row in warnings}
     return {
         "covered": frame(positive),
+        "supports": sorted(
+            [
+                {
+                    **proof,
+                    "interval": {
+                        "start": _text(max(a, span[0])),
+                        "end": _text(min(b, span[1])),
+                    },
+                }
+                for a, b, proof in proofs
+                if max(a, span[0]) < min(b, span[1])
+            ],
+            key=dumps,
+        ),
         "gaps": gaps,
         "defeated": frame(clipped(exclusions)),
         "statements": evidence,
@@ -214,13 +239,19 @@ def compose(
             exact.possible_violation,
             exact.premise_reports,
             exact.inferred_violation,
+            exact.clock_constraints,
         )
     enabled = [unit for unit in scopes if unit.id in exact.eligible]
     rule = policy["defeat_scope"]
     disabled: set[Pair] = set()
     conflicts = list(exact.conflicts)
     counterexamples: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for channel, lower, upper, sources, units in exact.omissions:
+    premise_digest = (
+        "sha256:" + hashlib.sha256(dumps(list(exact.clock_constraints))).hexdigest()
+        if exact.omissions
+        else None
+    )
+    for channel, lower, upper, occurrence, sources, units in exact.omissions:
         parts = [named[key] for key in units]
         affected = set().union(*(_affected(scopes, part, channel, rule) for part in parts))
         disabled.update(affected)
@@ -237,6 +268,8 @@ def compose(
                 "lower": _text(lower),
                 "upper": _text(upper),
                 "report_ids": list(sources),
+                "occurrence": occurrence,
+                "clock_constraints_digest": premise_digest,
                 "unit_ids": list(units),
                 "defeat_scope": rule,
                 "defeated_units": [{"unit": unit, "channel": ch} for unit, ch in sorted(affected)],
@@ -286,4 +319,5 @@ def compose(
         exact.possible_violation,
         exact.premise_reports,
         exact.inferred_violation,
+        exact.clock_constraints,
     )
