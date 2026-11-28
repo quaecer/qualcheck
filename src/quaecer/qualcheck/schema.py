@@ -74,8 +74,9 @@ def decode(data: bytes) -> Any:
 class Catalogue:
     """An offline catalogue of recognized schema objects (QUAL-REQ-001)."""
 
-    def __init__(self, documents: dict[str, Any]) -> None:
+    def __init__(self, documents: dict[str, Any], assets: Path | None = None) -> None:
         self.documents = documents
+        self.assets = assets
 
     @classmethod
     def load(cls, local: Path | None) -> "Catalogue":
@@ -92,7 +93,14 @@ class Catalogue:
             if name != BASE + path.name or name in definitions:
                 raise ValueError("unrecognized schema identity")
             definitions[name] = document
-        return cls(definitions)
+        return cls(definitions, local.parent)
+
+    def context(self, name: str) -> Any:
+        """Read the exact local context; a request never chooses a remote source."""
+        if self.assets is None or name not in {"evidence", "result"}:
+            raise ValueError("context is unavailable")
+        document = decode((self.assets / "context" / (name + ".jsonld")).read_bytes())
+        return document["@context"]
 
     def accepts(self, name: str, message: Any) -> bool:
         """Check a JSON value against a named schema in the local mandate."""

@@ -11,6 +11,8 @@ qualcheck verify --input verification-envelope.json
 
 A verification envelope contains the raw assessment request and the supplied
 result. The receiver checks the complete result against its own computation.
+The fixed RDF envelope uses installed JSON-LD contexts for the raw evidence
+and carried result. Context changes and nested directives fail closed.
 An unavailable or unresolved premise cannot establish a positive gate.
 Known exposure intervals and accepted aliases also constrain true time.
 A definite forbidden exposure can fail the gate. Full committed coverage,
